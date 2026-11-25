@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uangku/core/constants/channel_constants.dart';
+import 'package:uangku/features/technical_spike/data/finance_bridge.dart';
 import 'package:uangku/features/technical_spike/data/native_bridge.dart';
 import 'package:uangku/features/technical_spike/presentation/pages/spike_home_page.dart';
 
@@ -37,7 +38,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('NOT TESTED'), findsOneWidget);
+    expect(find.text('NOT TESTED'), findsNWidgets(2));
 
     await tester.tap(find.text('Test Native Connection'));
     await tester.pumpAndSettle();
@@ -150,5 +151,80 @@ void main() {
 
     expect(find.text('SUCCESS'), findsOneWidget);
     expect(methodCallCount, 1);
+  });
+
+  testWidgets('sends transactions to Go and renders the summary', (
+    tester,
+  ) async {
+    MethodCall? receivedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      receivedCall = call;
+      return <String, int>{
+        'incomeTotal': 175000,
+        'expenseTotal': 25000,
+        'netBalance': 150000,
+      };
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SpikeHomePage(
+          nativeBridge: NativeBridge(platformOverride: TargetPlatform.android),
+          financeBridge: FinanceBridge(
+            platformOverride: TargetPlatform.android,
+          ),
+        ),
+      ),
+    );
+    await tester.ensureVisible(find.text('Test Go Finance Summary'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test Go Finance Summary'));
+    await tester.pumpAndSettle();
+
+    expect(receivedCall?.method, nativeBridgeSummaryMethod);
+    final arguments = receivedCall?.arguments as Map<Object?, Object?>;
+    expect(
+      arguments['transactionsJson'],
+      '[{"type":"income","amount":125000},'
+      '{"type":"income","amount":50000},'
+      '{"type":"expense","amount":25000}]',
+    );
+    expect(find.text('SUCCESS'), findsOneWidget);
+    expect(find.text('Rp 175000'), findsOneWidget);
+    expect(find.text('Rp 25000'), findsOneWidget);
+    expect(find.text('Rp 150000'), findsOneWidget);
+  });
+
+  testWidgets('shows a safe error when Go rejects finance input', (
+    tester,
+  ) async {
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      throw PlatformException(
+        code: 'INVALID_ARGUMENT',
+        message: 'sensitive transaction detail',
+      );
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SpikeHomePage(
+          nativeBridge: NativeBridge(platformOverride: TargetPlatform.android),
+          financeBridge: FinanceBridge(
+            platformOverride: TargetPlatform.android,
+          ),
+        ),
+      ),
+    );
+    await tester.ensureVisible(find.text('Test Go Finance Summary'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test Go Finance Summary'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ERROR'), findsOneWidget);
+    expect(
+      find.textContaining('Use non-negative whole-rupiah amounts'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('sensitive transaction detail'), findsNothing);
   });
 }
